@@ -1,0 +1,361 @@
+import { UserStatus } from "@prisma/client";
+import bcrypt from "bcrypt";
+import httpStatus from "http-status";
+import { Secret } from "jsonwebtoken";
+import config from "../../../config";
+import { otpEmail } from "../../../emails/otpEmail";
+import ApiError from "../../../errors/ApiErrors";
+import emailSender from "../../../helpars/emailSender/emailSender";
+import prisma from "../../../shared/prisma";
+import { jwtHelpers } from "../../../utils/jwtHelpers";
+import { comparePassword, hashPassword } from "../../../utils/passwordHelpers";
+import * as crypto from "crypto";
+
+//criptographycally secure otp generate 
+const generateSecureOTpP = () : string =>{
+  return crypto.randomInt(100000, 999999).toString()
+}
+
+//timing safe otp copparison
+
+const isOTPValid = (inputOTP: string, storedOTP : string) : boolean => {
+ if (inputOTP.length !== storedOTP.length) return false
+ return crypto.timingSafeEqual(
+  Buffer.from(inputOTP),
+  Buffer.from(storedOTP)
+ )
+}
+
+
+const verifyUserByOTP = async (email: string, otp: string) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid OTP or email.");
+  }
+
+
+  if (!user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "OTP has expired.");
+  }
+
+  if (!user.otp || !isOTPValid(otp, user.otp)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid OTP or email.");
+  }
+
+  await prisma.user.update({
+    where: {
+      email: user.email,
+    },
+    data: {
+      isVerified: true,
+      otp: null,
+      otpExpiresAt: null,
+    },
+  });
+
+  const accessToken = jwtHelpers.generateToken(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    },
+    config.jwt.jwt_secret as Secret,
+    config.jwt.expires_in as string
+  );
+
+  const refreshToken = jwtHelpers.generateToken(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    },
+    config.jwt.refresh_token_secret as Secret,
+    config.jwt.refresh_token_expires_in as string
+  );
+
+  await prisma.user.update({
+    where: {
+      email: user.email,
+    },
+    data: {
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+    },
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+  };
+};
+
+const refreshToken = async (refreshToken: string) => {
+  const decodedToken = jwtHelpers.verifyToken(
+    refreshToken,
+    config.jwt.refresh_token_secret as Secret
+  );
+
+  if (!decodedToken) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid token");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      email: decodedToken.email,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  if (user.refreshToken !== refreshToken) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid token");
+  }
+
+  const accessToken = jwtHelpers.generateToken(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    },
+    config.jwt.jwt_secret as Secret,
+    config.jwt.expires_in as string
+  );
+
+  await prisma.user.update({
+    where: {
+      email: user.email,
+    },
+    data: {
+      accessToken: accessToken,
+    },
+  });
+
+  return { accessToken };
+};
+
+const loginUser = async (
+  email: string,
+  password: string,
+
+) => {
+  const userData = await prisma.user
+    .findUniqueOrThrow({ where: { email } })
+    .catch(() => {
+      throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid email or password.");
+    });
+
+  if (userData.status === UserStatus.DELETED) {
+    throw new ApiError(403, "Your account has been deleted.");
+  }
+
+  if (!password || !userData?.password) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Password is required");
+  }
+
+
+  const isCorrectPassword: boolean = await comparePassword(
+    password,
+    userData.password
+  );
+
+  if (!isCorrectPassword) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid email or password.");
+  }
+
+
+  if (userData?.isVerified === false) {
+    const randomOtp = generateSecureOTpP();
+    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: userData.id },
+      data: { otp: randomOtp, otpExpiresAt: otpExpiry },
+    });
+
+    await emailSender(
+      "Verify Your Account",
+      userData.email,
+      otpEmail(randomOtp)
+    );
+
+    return {
+      data: { id: userData.id, email: userData.email, role: userData.role },
+      message: "Please verify your email with the OTP sent to your email address.",
+    };
+  }
+
+  const accessToken = jwtHelpers.generateToken(
+    { id: userData.id, email: userData.email, role: userData.role },
+    config.jwt.jwt_secret as Secret,
+    config.jwt.expires_in as string
+  );
+
+  const refreshToken = jwtHelpers.generateToken(
+    { id: userData.id, email: userData.email, role: userData.role },
+    config.jwt.refresh_token_secret as Secret,
+    config.jwt.refresh_token_expires_in as string
+  );
+
+  await prisma.user.update({
+    where: { email: userData.email },
+    data: { accessToken, refreshToken },
+  });
+
+  return {
+    data: { accessToken, refreshToken },
+    message: "Login successful",
+  };
+};
+
+// get user profile
+const getMyProfile = async (email: string) => {
+  if (!email) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, "Unauthorized");
+  }
+
+  const userProfile = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      image: true,
+      email: true,
+      role: true,
+      isVerified: true,
+      privacyPolicyAccepted: true,
+      phoneNumber: true,
+      dateOfBirth: true,
+      address: true,
+      createdAt: true,
+      updatedAt: true,
+      status: true,
+    },
+  });
+
+  if (!userProfile) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  return userProfile;
+};
+
+const forgetPassword = async (email: string) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+  });
+
+  if (!user) {
+   return
+  }
+
+  const randomOtp = generateSecureOTpP();
+  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+  await prisma.user.update({
+    where: {
+      id: user.id,
+    },
+    data: {
+      otp: randomOtp,
+      otpExpiresAt: otpExpiry,
+    },
+  });
+await emailSender("Password Reset OTP", user.email, otpEmail(randomOtp));
+};
+
+const resetPassword = async (email: string, password: string) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+  if (password.length < 8) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Password must be at least 8 characters"
+    );
+  }
+  const hashedPassword = await hashPassword(password);
+
+  await prisma.user.update({
+    where: {
+      id: user.id,
+    },
+    data: {
+      password: hashedPassword,
+      otp: null,
+      otpExpiresAt: null,
+      accessToken:null, 
+      refreshToken : null
+    },
+  });
+};
+
+const logOutUser = async (email: string) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  await prisma.user.update({
+    where: {
+      id: user.id,
+    },
+    data: {
+      accessToken: null,
+      refreshToken: null,
+    },
+  });
+};
+
+export const AuthServices = {
+  verifyUserByOTP,
+  refreshToken,
+  loginUser,
+  logOutUser,
+  getMyProfile,
+  forgetPassword,
+  resetPassword,
+};
+
+/*
+
+* Login Flow
+1. User requests to login
+2. If user is not verified, generate OTP and send email
+3. If user is verified, generate access and refresh token and send them to the user
+
+* OTP Flow
+1. User requests to verify OTP
+2. If OTP is valid, update user to verified and generate access and refresh token
+3. If OTP is invalid, return error
+
+* Forget Password Flow
+1. User requests to forget password
+2. Generate OTP and send email
+3. Verify OTP, if valid, generate access and refresh token and save them to the user table
+4. save token and set password and login
+
+
+*/
