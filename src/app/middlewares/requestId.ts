@@ -1,22 +1,24 @@
-import { NextFunction, Request, Response } from "express";
-import { randomUUID } from "crypto";
+import { Request, Response, NextFunction } from "express";
+import * as crypto from "crypto";
+
 declare global {
   namespace Express {
     interface Request {
-      requestId: string;
+      requestId?: string;
     }
   }
 }
 
-export const requestId = (
+export const requestIdMiddleware = (
   req: Request,
   res: Response,
   next: NextFunction
-): void => {
+) => {
+  const existingId = req.headers["x-request-id"] as string;
+  const requestId = existingId || crypto.randomUUID();
 
-  const id = (req.headers["x-request-id"] as string) || randomUUID();
-  req.requestId = id;
-  res.setHeader("X-Request-ID", id);
+  req.requestId = requestId;
+  res.setHeader("x-request-id", requestId);
 
   next();
 };

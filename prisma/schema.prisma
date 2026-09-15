@@ -42,17 +42,27 @@ model User {
 
   stripeCustomerId String?
   provider String?
-
-  accessToken  String?
-  refreshToken String?
-
+  sessions Session[]
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
   @@map("users")
 }
 
+model Session {
+  id String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sessions")
+}
 model Test {
   id String @id @default(cuid())
 

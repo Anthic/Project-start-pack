@@ -1,37 +1,30 @@
-import { createLogger, format, transports } from "winston";
+import winston from "winston";
+import path from "path";
+import config from "../config";
 
-// Function to format the log output
-const logFormat = format.combine(
-  format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-  format.errors({ stack: true }),
-  format.splat(),
-  format.colorize(),
-  format.printf(({ timestamp, level, message, stack }) => {
-    return `${timestamp} [${level}] ${message} ${stack || ""}`;
-  })
-);
+const { combine, timestamp, printf, colorize, json } = winston.format;
 
-const logger = createLogger({
-  level: "info",
-  format: format.combine(
-    format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    format.errors({ stack: true }),
-    format.splat(),
-    format.json()
+const consoleFormat = printf(({ level, message, timestamp, requestId, ...meta }) => {
+  const reqIdStr = requestId ? `[${requestId}] ` : "";
+  const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
+  return `${timestamp} ${level}: ${reqIdStr}${message}${metaStr}`;
+});
+
+const logger = winston.createLogger({
+  level: config.env === "development" ? "debug" : "info",
+  format: combine(
+    timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+    config.env === "production" ? json() : combine(colorize(), consoleFormat)
   ),
-  defaultMeta: { service: process.env.SERVICE_NAME || "default-service-name" },
   transports: [
-    new transports.Console({
-      // format: format.combine(
-      //   format.colorize(),
-      //   format.printf(({ timestamp, level, message, stack }) => {
-      //     return `${timestamp} ${level}: ${message} ${stack || ""}`;
-      //   })
-      // ),
-      format: logFormat,
+    new winston.transports.Console(),
+    new winston.transports.File({
+      filename: path.join("logs", "error.log"),
+      level: "error",
     }),
-    new transports.File({ filename: "logs/error.log", level: "error" }),
-    new transports.File({ filename: "logs/combined.log" }),
+    new winston.transports.File({
+      filename: path.join("logs", "combined.log"),
+    }),
   ],
 });
 

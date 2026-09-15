@@ -9,6 +9,12 @@ import GlobalErrorHandler from "./app/middlewares/globalErrorHandler";
 import router from "./app/routes";
 import logger from "./utils/logger";
 import helmet from "helmet";
+import redisClient from "./config/redis";
+import prisma from "./shared/prisma";
+import swaggerUi from "swagger-ui-express";
+import { swaggerDocs } from "./config/swagger";
+import { requestIdMiddleware } from "./app/middlewares/requestId";
+
 const app: Application = express();
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -57,24 +63,49 @@ app.get("/", (req: Request, res: Response) => {
 // app.use("/uploads", express.static(path.join("/var/www/uploads")));
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads"))); // Serve static files from the "uploads" directory
 
+// Correlation ID middleware
+app.use(requestIdMiddleware);
+
 // Log incoming requests
 app.use((req: Request, res: Response, next: NextFunction) => {
-  logger.info(`Incoming request: ${req.method} ${req.originalUrl}`);
+  logger.info(`Incoming request: ${req.method} ${req.originalUrl}`, {
+    requestId: req.requestId,
+  });
   next();
 });
 
 // Setup API routes
 app.use("/api/v1", router);
-
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 // health check
-app.get("/health", (req: Request, res: Response) => {
-  res.status(httpStatus.OK).json({
-    status: "healthy",
-    uptime: Math.floor(process.uptime()),
-    environment: process.env.NODE_ENV || "development",
-    version: process.env.npm_package_version || "1.0.0",
-    serverTime: new Date().toISOString(),
-  });
+app.get("/health", async (req, res) => {
+  try {
+    const dbCheck = await prisma.$queryRaw`SELECT 1`
+      .then(() => "healthy")
+      .catch(() => "unhealthy");
+
+    const redisCheck = await redisClient.ping()
+      .then((pong) => (pong === "PONG" ? "healthy" : "unhealthy"))
+      .catch(() => "unhealthy");
+
+    const isHealthy = dbCheck === "healthy" && redisCheck === "healthy";
+
+    res.status(isHealthy ? 200 : 503).json({
+      success: isHealthy,
+      message: isHealthy ? "System is fully operational" : "System is degraded",
+      timestamp: new Date().toISOString(),
+      uptime: `${Math.floor(process.uptime())}s`,
+      services: {
+        database: dbCheck,
+        redis: redisCheck,
+      },
+    });
+  } catch (error) {
+    res.status(503).json({
+      success: false,
+      message: "Health check failed",
+    });
+  }
 });
 
 // Error handling middleware

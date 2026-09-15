@@ -119,9 +119,12 @@ const createSocialUser = async (payload: TSocialUser) => {
       config.jwt.refresh_token_expires_in as string
     );
 
-    await prisma.user.update({
-      where: { id: isUser.id },
-      data: { accessToken, refreshToken },
+    await prisma.session.create({
+      data: {
+        userId: isUser.id,
+        refreshToken,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
     });
 
     return {
@@ -188,9 +191,12 @@ const createSocialUser = async (payload: TSocialUser) => {
     config.jwt.refresh_token_expires_in as string
   );
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { accessToken, refreshToken },
+  await prisma.session.create({
+    data: {
+      userId: user.id,
+      refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
   });
 
   return {

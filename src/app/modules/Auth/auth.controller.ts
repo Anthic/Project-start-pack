@@ -97,16 +97,16 @@ const resetPassword = catchAsync(async (req: Request, res: Response) => {
 });
 
 const logOutUser = catchAsync(async (req: Request, res: Response) => {
-  const email = req.user?.email;
-
-  await AuthServices.logOutUser(email);
-
+  const userId = req.user?.id;
+  
+  const refreshToken =
+    req.cookies?.token || req.headers["x-refresh-token"] as string;
+  await AuthServices.logOutUser(userId, refreshToken);
   res.clearCookie("token", {
     secure: config.env === "production",
     httpOnly: true,
     sameSite: config.env === "production" ? "strict" : "lax",
   });
-
   sendResponse(res, {
     success: true,
     statusCode: httpStatus.OK,
