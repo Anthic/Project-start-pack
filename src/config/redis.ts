@@ -1,14 +1,14 @@
 import Redis from "ioredis";
-
+import config from "./index";
 const redisClient = new Redis({
-    host: process.env.REDIS_HOST || "127.0.0.1",
-    port: Number(process.env.REDIS_PORT) || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
-    maxRetriesPerRequest: null, // usign bullMQ thats why use null
-    retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay
-    }
+  host: config.redis.host,
+  port: config.redis.port,
+  password: config.redis.password || undefined,
+  maxRetriesPerRequest: null,
+  retryStrategy: (times) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
 })
 
 redisClient.on("connect", () => {

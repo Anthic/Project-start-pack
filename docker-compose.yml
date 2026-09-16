@@ -13,6 +13,11 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -22,7 +27,34 @@ services:
       - '6379:6379'
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: starter_app
+    restart: always
+    env_file: .env.docker
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - PORT=8000
+    ports:
+      - '8000:8000'
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
 
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:
+  logs_data:

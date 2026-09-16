@@ -1,26 +1,29 @@
 import dotenv from "dotenv";
 import path from "path";
 
+// .env
 dotenv.config({ path: path.join(process.cwd(), ".env") });
 
-export default {
-  env: process.env.NODE_ENV,
-  port: process.env.PORT || 8000,
-  url: {
-    frontend_url: process.env.FRONTEND_URL,
-    backend_url: process.env.BACKEND_URL,
-    image_url: process.env.BACKEND_IMAGE_URL,
-  },
+// Zod validation 
+import { env } from "./env";
 
+export default {
+  env: env.NODE_ENV,
+  port: env.PORT,
+  url: {
+    frontend_url: env.FRONTEND_URL,
+    backend_url: process.env.BACKEND_URL,
+    image_url: env.BACKEND_IMAGE_URL,
+  },
   jwt: {
-    jwt_secret: process.env.JWT_SECRET,
-    expires_in: process.env.EXPIRES_IN,
-    refresh_token_secret: process.env.REFRESH_TOKEN_SECRET,
-    refresh_token_expires_in: process.env.REFRESH_TOKEN_EXPIRES_IN,
+    jwt_secret: env.JWT_SECRET,
+    expires_in: env.EXPIRES_IN,
+    refresh_token_secret: env.REFRESH_TOKEN_SECRET,
+    refresh_token_expires_in: env.REFRESH_TOKEN_EXPIRES_IN,
   },
   emailSender: {
-    email: process.env.EMAIL,
-    app_pass: process.env.APP_PASS,
+    email: env.EMAIL,
+    app_pass: env.APP_PASS,
   },
   stripe: {
     stripe_secret_key: process.env.STRIPE_SECRET_KEY,
@@ -45,5 +48,10 @@ export default {
   },
   password: {
     password_salt: process.env.PASSWORD_SALT,
+  },
+  redis: {
+    host: env.REDIS_HOST,
+    port: Number(env.REDIS_PORT),
+    password: env.REDIS_PASSWORD,
   },
 };

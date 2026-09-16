@@ -3,6 +3,8 @@ import app from "./app";
 import config from "./config";
 import logger from "./utils/logger";
 import emailWorker from "./workers/emailWorker";
+import redisClient from "./config/redis";
+import prisma from "./shared/prisma";
 
 let server: Server;
 
@@ -16,17 +18,20 @@ const gracefulShutdown = async (signal: string) => {
     logger.info("Email worker closed successfully.");
    
     if (server) {
-      server.close(() => {
-        logger.info(`${signal} received. HTTP server closed successfully.`);
-        process.exit(0);
-      });
-      setTimeout(() => {
-        logger.error("Forced shutdown after 10s timeout.");
-        process.exit(1);
-      }, 10_000);
-    } else {
-      process.exit(0);
+      await new Promise<void>((resolve) => {
+        server.close(() =>{
+          logger.info("HTTP server closed successfully")
+          resolve()
+        })
+      })
     }
+    await redisClient.quit()
+    logger.info("Redis client closed successfully")
+    await prisma.$disconnect()
+    logger.info("Prisma client closed successfully")
+
+    logger.info("Graceful shutdown complete. Bye!");
+    process.exit(0)
   } catch (error) {
     logger.error("Error during graceful shutdown:", error);
     process.exit(1);
